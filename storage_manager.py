@@ -7,8 +7,6 @@ import io
 import json
 import concurrent.futures
 import time
-import shutil
-import tempfile
 
 class DistributedStorageManager:
     """Manages chunking, encryption, and parallel distribution of files/folders."""
@@ -28,6 +26,19 @@ class DistributedStorageManager:
     def _save_json(self, path, data):
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
+
+    def _make_registry_key(self, remote_name, parent_path='root'):
+        if parent_path == 'root':
+            return remote_name
+        return f"{parent_path}/{remote_name}"
+
+    def _split_registry_key(self, registry_key, file_info=None):
+        if file_info and 'parent_path' in file_info:
+            return registry_key.split('/')[-1], file_info['parent_path']
+        if '/' in registry_key:
+            parent_path, remote_name = registry_key.rsplit('/', 1)
+            return remote_name, parent_path
+        return registry_key, 'root'
 
     def _get_service(self, creds, acc_idx):
         """Returns a cached Drive service object for the given account."""
@@ -72,10 +83,9 @@ class DistributedStorageManager:
         file_size = os.path.getsize(local_path)
         total_chunks = (file_size + BLOCK_SIZE - 1) // BLOCK_SIZE
         
-        UI.info(f"{remote_name} -> {total_chunks} chunks (Turbo Mode)")
+        UI.info(f"{remote_name} -> {total_chunks} chunks")
         chunks_info = [None] * total_chunks
         
-        # High concurrency: 5 threads per account
         workers = num_accounts * 5
         completed = 0
         
@@ -85,7 +95,7 @@ class DistributedStorageManager:
                 upload_tasks = []
                 
                 for c_idx in range(total_chunks):
-                    acc_idx = c_idx % num_accounts # Distribute round-robin for better balance
+                    acc_idx = c_idx % num_accounts
                     creds = acc_manager.creds_list[acc_idx]
                     
                     byte_offset = c_idx * BLOCK_SIZE
@@ -111,7 +121,9 @@ class DistributedStorageManager:
                 UI.status("some chunks failed to upload", success=False)
                 return False
 
-            self.registry[remote_name] = {
+            registry_key = self._make_registry_key(remote_name, parent_path)
+            self.registry[registry_key] = {
+                "name": remote_name,
                 "file_size": file_size,
                 "chunks": chunks_info,
                 "parent_path": parent_path,
@@ -122,7 +134,7 @@ class DistributedStorageManager:
             return True
 
         except Exception as e:
-            UI.status(f"critical upload error: {e}", success=False)
+            UI.status(f"upload error: {e}", success=False)
             return False
 
     def mkdir_distributed(self, folder_name, acc_manager, path_key, parent_ids_map=None):
@@ -179,12 +191,12 @@ class DistributedStorageManager:
             UI.status(f"fail: chunk {order}: {e}", success=False)
             return None
 
-    def download_distributed(self, remote_name, local_path, acc_manager):
-        if remote_name not in self.registry:
-            UI.status(f"file '{remote_name}' not in registry", success=False)
+    def download_distributed(self, registry_key, local_path, acc_manager):
+        if registry_key not in self.registry:
+            UI.status(f"file '{registry_key}' not in registry", success=False)
             return False
         
-        file_info = self.registry[remote_name]
+        file_info = self.registry[registry_key]
         chunks = sorted(file_info['chunks'], key=lambda x: x['order'])
         num_chunks = len(chunks)
         
@@ -225,16 +237,15 @@ class DistributedStorageManager:
             UI.status(f"critical download error: {e}", success=False)
             return False
 
-    def delete_distributed(self, remote_name, acc_manager):
+    def delete_distributed(self, registry_key, acc_manager):
         """Permanently deletes a distributed file and all its chunks from the cloud."""
-        if remote_name not in self.registry:
-            UI.status(f"file '{remote_name}' not in registry", success=False)
+        if registry_key not in self.registry:
+            UI.status(f"file '{registry_key}' not in registry", success=False)
             return False
         
-        file_info = self.registry[remote_name]
+        file_info = self.registry[registry_key]
         chunks = file_info['chunks']
         num_chunks = len(chunks)
-        num_accounts = len(acc_manager.creds_list)
         
         UI.info(f"deleting {num_chunks} chunks from drive...")
         completed = 0
@@ -244,9 +255,9 @@ class DistributedStorageManager:
                 service = self._get_service(creds, acc_idx)
                 service.files().delete(fileId=drive_id).execute()
                 return order
-            except Exception as e:
+            except Exception:
                 # If chunk already deleted or account missing permissions
-                return order # Still return order to show progress/account for it
+                return order
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             delete_tasks = []
@@ -263,9 +274,9 @@ class DistributedStorageManager:
                     completed += 1
                     UI.progress_bar(completed, num_chunks, prefix="purging")
 
-        del self.registry[remote_name]
+        del self.registry[registry_key]
         self._save_json(self.registry_path, self.registry)
-        UI.status(f"removed {remote_name} from distributed storage")
+        UI.status(f"removed {registry_key} from distributed storage")
         return True
 
     def list_distributed_files(self):
@@ -275,9 +286,11 @@ class DistributedStorageManager:
         
         print("\n--- Distributed Files (Registry) ---")
         files = list(self.registry.keys())
-        for i, name in enumerate(files):
-            info = self.registry[name]
+        for i, registry_key in enumerate(files):
+            info = self.registry[registry_key]
+            display_name, parent_path = self._split_registry_key(registry_key, info)
             size_mb = info['file_size'] / (1024 * 1024)
-            print(f"[{i}] {name} ({size_mb:.2f} MB, {len(info['chunks'])} chunks)")
+            logical_path = display_name if parent_path == 'root' else f"{parent_path}/{display_name}"
+            print(f"[{i}] {logical_path} ({size_mb:.2f} MB, {len(info['chunks'])} chunks)")
         
         return files

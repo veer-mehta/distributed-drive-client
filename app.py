@@ -1,18 +1,27 @@
 import os
-import time
 from auth_manager import AccountManager
 from storage_manager import DistributedStorageManager
-from drive_helpers import list_files_selectable, create_folder
 from ui_utils import UI
 
 def migrate_registry(dist_manager):
     """Ensures all registry entries have a parent_path field."""
     updated = False
-    for name, info in dist_manager.registry.items():
+    migrated_registry = {}
+    for old_key, info in dist_manager.registry.items():
         if 'parent_path' not in info:
             info['parent_path'] = 'root'
             updated = True
+        if 'name' not in info:
+            info['name'] = old_key.split('/')[-1]
+            updated = True
+
+        new_key = dist_manager._make_registry_key(info['name'], info['parent_path'])
+        if new_key != old_key:
+            updated = True
+        migrated_registry[new_key] = info
+
     if updated:
+        dist_manager.registry = migrated_registry
         dist_manager._save_json(dist_manager.registry_path, dist_manager.registry)
 
 def main():
@@ -65,9 +74,14 @@ def main():
                         display_items.append({'type': 'dir', 'name': name, 'ids': ids, 'path': path})
                 
                 # 2. Find virtual files
-                for name, info in dist_manager.registry.items():
+                for registry_key, info in dist_manager.registry.items():
                     if info.get('parent_path') == current_folder_name:
-                        display_items.append({'type': 'file', 'name': name, 'size': info['file_size']})
+                        display_items.append({
+                            'type': 'file',
+                            'name': info.get('name', registry_key.split('/')[-1]),
+                            'registry_key': registry_key,
+                            'size': info['file_size']
+                        })
 
                 if not display_items:
                     print(f"\n {UI.DIM}this virtual folder is empty.{UI.RESET}")
@@ -109,10 +123,10 @@ def main():
                             if op == '1' or op == '2':
                                 local_p = input(f"{UI.DIM}› save as (default: downloaded_{selected['name']}):{UI.RESET} ")
                                 if not local_p: local_p = f"downloaded_{selected['name']}"
-                                if dist_manager.download_distributed(selected['name'], local_p, acc_manager):
-                                    if op == '2': dist_manager.delete_distributed(selected['name'], acc_manager)
+                                if dist_manager.download_distributed(selected['registry_key'], local_p, acc_manager):
+                                    if op == '2': dist_manager.delete_distributed(selected['registry_key'], acc_manager)
                             elif op == '3':
-                                dist_manager.delete_distributed(selected['name'], acc_manager)
+                                dist_manager.delete_distributed(selected['registry_key'], acc_manager)
                     else: UI.status("invalid index", success=False)
                 except ValueError: pass
             UI.clear()
@@ -123,10 +137,10 @@ def main():
             if not os.path.exists(local_path):
                 UI.status("file not found", success=False)
                 continue
+
             remote_name = input(f"{UI.DIM}› name (default: {os.path.basename(local_path)}):{UI.RESET} ")
             if not remote_name: remote_name = os.path.basename(local_path)
             
-            # Pass the current IDs map and the virtual path
             dist_manager.upload_distributed(local_path, remote_name, acc_manager, 
                                            parent_ids_map=current_ids_map, 
                                            parent_path=current_folder_name)
