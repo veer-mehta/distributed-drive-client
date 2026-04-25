@@ -7,3 +7,4 @@ credentials.json
 __pycache__
 temp_uploads/
 temp_downloads/
+tests/

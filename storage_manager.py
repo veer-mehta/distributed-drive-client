@@ -1,7 +1,6 @@
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from config import cipher, BLOCK_SIZE
-from ui_utils import UI
 import os
 import io
 import json
@@ -71,27 +70,25 @@ class DistributedStorageManager:
                 "order": chunk_idx
             }
         except Exception as e:
-            UI.status(f"fail: chunk {chunk_idx}: {e}", success=False)
+            print(f" [!] Error: chunk {chunk_idx}: {e}")
             return None
 
     def upload_distributed(self, local_path, remote_name, acc_manager, parent_ids_map=None, parent_path='root'):
         if not acc_manager.creds_list:
-            UI.status("no authorized accounts found", success=False)
+            print(" [!] Error: No authorized accounts found.")
             return False
 
         num_accounts = len(acc_manager.creds_list)
         file_size = os.path.getsize(local_path)
         total_chunks = (file_size + BLOCK_SIZE - 1) // BLOCK_SIZE
         
-        UI.info(f"{remote_name} -> {total_chunks} chunks")
+        print(f" [*] Distributing {remote_name} -> {total_chunks} chunks")
         chunks_info = [None] * total_chunks
         
         workers = num_accounts * 5
-        completed = 0
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                UI.progress_bar(0, total_chunks, prefix="uploading")
                 upload_tasks = []
                 
                 for c_idx in range(total_chunks):
@@ -114,11 +111,9 @@ class DistributedStorageManager:
                     res = future.result()
                     if res:
                         chunks_info[res['order']] = res
-                        completed += 1
-                        UI.progress_bar(completed, total_chunks, prefix="uploading")
 
             if None in chunks_info:
-                UI.status("some chunks failed to upload", success=False)
+                print(" [!] Error: Some chunks failed to upload.")
                 return False
 
             registry_key = self._make_registry_key(remote_name, parent_path)
@@ -130,18 +125,18 @@ class DistributedStorageManager:
                 "timestamp": time.time()
             }
             self._save_json(self.registry_path, self.registry)
-            UI.status(f"distributed upload complete: {remote_name}")
+            print(f" [+] Success: Distributed upload complete: {remote_name}")
             return True
 
         except Exception as e:
-            UI.status(f"upload error: {e}", success=False)
+            print(f" [!] Error: Upload failed: {e}")
             return False
 
     def mkdir_distributed(self, folder_name, acc_manager, path_key, parent_ids_map=None):
         """Creates a folder in all accounts, tracks them together, and saves to registry."""
         if not acc_manager.creds_list: return None
         
-        UI.info(f"creating distributed folder: {folder_name}...")
+        print(f" [*] Creating distributed folder: {folder_name}...")
         new_ids_map = {}
         
         def _mkdir_task(creds, acc_idx, p_id):
@@ -152,7 +147,7 @@ class DistributedStorageManager:
                 folder = service.files().create(body=file_metadata, fields="id").execute()
                 return acc_idx, folder.get("id")
             except Exception as e:
-                print(f"Error in acc {acc_idx}: {e}")
+                print(f" [!] Error in acc {acc_idx}: {e}")
                 return acc_idx, None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(acc_manager.creds_list)) as executor:
@@ -168,7 +163,7 @@ class DistributedStorageManager:
         if new_ids_map:
             self.folder_registry[path_key] = new_ids_map
             self._save_json(self.folder_registry_path, self.folder_registry)
-            UI.status(f"distributed folder '{folder_name}' synced across {len(new_ids_map)} accounts")
+            print(f" [+] Success: Folder '{folder_name}' synced across {len(new_ids_map)} accounts.")
             return new_ids_map
         return None
 
@@ -188,27 +183,25 @@ class DistributedStorageManager:
             decrypted_data = cipher.decrypt(chunk_buffer.getvalue())
             return {"order": order, "data": decrypted_data}
         except Exception as e:
-            UI.status(f"fail: chunk {order}: {e}", success=False)
+            print(f" [!] Error: chunk {order}: {e}")
             return None
 
     def download_distributed(self, registry_key, local_path, acc_manager):
         if registry_key not in self.registry:
-            UI.status(f"file '{registry_key}' not in registry", success=False)
+            print(f" [!] Error: File '{registry_key}' not in registry.")
             return False
         
         file_info = self.registry[registry_key]
         chunks = sorted(file_info['chunks'], key=lambda x: x['order'])
         num_chunks = len(chunks)
         
-        UI.info(f"fetching {num_chunks} chunks (In-Memory)...")
+        print(f" [*] Fetching {num_chunks} chunks (In-Memory)...")
         
         chunk_data_map = [None] * num_chunks
-        completed = 0
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
                 download_tasks = []
-                UI.progress_bar(0, num_chunks, prefix="downloading")
                 for chunk in chunks:
                     acc_idx = chunk['account_id']
                     creds = acc_manager.creds_list[acc_idx]
@@ -218,37 +211,34 @@ class DistributedStorageManager:
                     res = future.result()
                     if res:
                         chunk_data_map[res['order']] = res['data']
-                        completed += 1
-                        UI.progress_bar(completed, num_chunks, prefix="downloading")
 
             if None in chunk_data_map:
-                UI.status("failed to retrieve all chunks", success=False)
+                print(" [!] Error: Failed to retrieve all chunks.")
                 return False
 
-            UI.info("assembling stream...")
+            print(" [*] Assembling stream...")
             with open(local_path, 'wb') as output_f:
                 for data in chunk_data_map:
                     output_f.write(data)
                 
-            UI.status("reassembled successfully")
+            print(" [+] Success: Reassembled successfully.")
             return True
 
         except Exception as e:
-            UI.status(f"critical download error: {e}", success=False)
+            print(f" [!] Error: Critical download error: {e}")
             return False
 
     def delete_distributed(self, registry_key, acc_manager):
         """Permanently deletes a distributed file and all its chunks from the cloud."""
         if registry_key not in self.registry:
-            UI.status(f"file '{registry_key}' not in registry", success=False)
+            print(f" [!] Error: File '{registry_key}' not in registry.")
             return False
         
         file_info = self.registry[registry_key]
         chunks = file_info['chunks']
         num_chunks = len(chunks)
         
-        UI.info(f"deleting {num_chunks} chunks from drive...")
-        completed = 0
+        print(f" [*] Deleting {num_chunks} chunks from drive...")
         
         def _delete_chunk_task(creds, drive_id, order, acc_idx):
             try:
@@ -256,12 +246,10 @@ class DistributedStorageManager:
                 service.files().delete(fileId=drive_id).execute()
                 return order
             except Exception:
-                # If chunk already deleted or account missing permissions
                 return order
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             delete_tasks = []
-            UI.progress_bar(0, num_chunks, prefix="purging")
             for chunk in chunks:
                 acc_idx = chunk['account_id']
                 if acc_idx < len(acc_manager.creds_list):
@@ -270,27 +258,8 @@ class DistributedStorageManager:
             
             for future in concurrent.futures.as_completed(delete_tasks):
                 res = future.result()
-                if res is not None:
-                    completed += 1
-                    UI.progress_bar(completed, num_chunks, prefix="purging")
 
         del self.registry[registry_key]
         self._save_json(self.registry_path, self.registry)
-        UI.status(f"removed {registry_key} from distributed storage")
+        print(f" [+] Removed {registry_key} from distributed storage.")
         return True
-
-    def list_distributed_files(self):
-        if not self.registry:
-            print("No distributed files found in registry.")
-            return None
-        
-        print("\n--- Distributed Files (Registry) ---")
-        files = list(self.registry.keys())
-        for i, registry_key in enumerate(files):
-            info = self.registry[registry_key]
-            display_name, parent_path = self._split_registry_key(registry_key, info)
-            size_mb = info['file_size'] / (1024 * 1024)
-            logical_path = display_name if parent_path == 'root' else f"{parent_path}/{display_name}"
-            print(f"[{i}] {logical_path} ({size_mb:.2f} MB, {len(info['chunks'])} chunks)")
-        
-        return files

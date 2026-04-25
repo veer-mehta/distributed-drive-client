@@ -9,9 +9,9 @@ from config import BLOCK_SIZE
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------------------------
-# Global state — initialized once on startup
-# ---------------------------------------------------------------------------
+
+# Global state & initialization
+
 acc_manager = None
 dist_manager = None
 
@@ -40,16 +40,16 @@ def init_managers():
         dist_manager.registry = migrated_registry
         dist_manager._save_json(dist_manager.registry_path, dist_manager.registry)
 
-# ---------------------------------------------------------------------------
+
 # Page Routes
-# ---------------------------------------------------------------------------
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ---------------------------------------------------------------------------
+
 # API: File Listing
-# ---------------------------------------------------------------------------
+
 @app.route('/api/files')
 def api_list_files():
     """Return files and folders at the given virtual path."""
@@ -85,9 +85,9 @@ def api_list_files():
 
     return jsonify({'items': items, 'path': path})
 
-# ---------------------------------------------------------------------------
+
 # API: Upload
-# ---------------------------------------------------------------------------
+
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
     """Handle file upload — saves temp, then distributes."""
@@ -130,9 +130,9 @@ def api_upload():
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-# ---------------------------------------------------------------------------
+
 # API: Download
-# ---------------------------------------------------------------------------
+
 @app.route('/api/download/<path:filename>')
 def api_download(filename):
     """Reassemble and stream a distributed file to the browser."""
@@ -152,9 +152,9 @@ def api_download(filename):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ---------------------------------------------------------------------------
+
 # API: Delete
-# ---------------------------------------------------------------------------
+
 @app.route('/api/files/<path:filename>', methods=['DELETE'])
 def api_delete(filename):
     """Delete a distributed file and all its chunks."""
@@ -167,9 +167,9 @@ def api_delete(filename):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ---------------------------------------------------------------------------
+
 # API: Create Folder
-# ---------------------------------------------------------------------------
+
 @app.route('/api/folders', methods=['POST'])
 def api_create_folder():
     """Create a new distributed folder."""
@@ -196,9 +196,9 @@ def api_create_folder():
     else:
         return jsonify({'success': False, 'error': 'Folder creation failed'}), 500
 
-# ---------------------------------------------------------------------------
+
 # API: Accounts
-# ---------------------------------------------------------------------------
+
 @app.route('/api/accounts')
 def api_accounts():
     """Return list of connected accounts."""
@@ -246,9 +246,9 @@ def api_remove_account(account_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ---------------------------------------------------------------------------
+
 # API: Delete Folder
-# ---------------------------------------------------------------------------
+
 @app.route('/api/folders/<path:folder_path>', methods=['DELETE'])
 def api_delete_folder(folder_path):
     """Delete a virtual folder and all its contents from the registry."""
@@ -292,9 +292,9 @@ def api_delete_folder(folder_path):
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ---------------------------------------------------------------------------
+
 # API: Storage Stats
-# ---------------------------------------------------------------------------
+
 @app.route('/api/storage/stats')
 def api_storage_stats():
     """Return aggregated storage statistics."""
@@ -315,9 +315,9 @@ def api_storage_stats():
         'chunks': total_chunks
     })
 
-# ---------------------------------------------------------------------------
+
 # Helpers
-# ---------------------------------------------------------------------------
+
 def _format_size(bytes_val):
     """Format bytes into human-readable string."""
     if not bytes_val:
@@ -354,9 +354,9 @@ def _format_time(timestamp):
     else:
         return time.strftime('%b %d, %Y', time.localtime(timestamp))
 
-# ---------------------------------------------------------------------------
+
 # Entry Point
-# ---------------------------------------------------------------------------
+
 if __name__ == '__main__':
     init_managers()
     print("\n  [*] DriveMesh is running at http://localhost:5000\n")
