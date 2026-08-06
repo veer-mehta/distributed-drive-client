@@ -1,0 +1,10 @@
+accounts_config.json
+credentials.json
+*.pycache*.
+gdenv
+.vscode
+.env
+secret.key
+fs.json
+acc_cfg.json
+credentials.json.bak

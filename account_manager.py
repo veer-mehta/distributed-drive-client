@@ -48,13 +48,17 @@ class AccountManager:
         return {}
 
     def _save_config(self):
-        json.dump(self.accs, open(self.config_path, "w"), indent=4)
+        save_data = {
+            name: {"creds": json.loads(acc["creds"].to_json())}
+            for name, acc in self.accs.items()
+        }
+        json.dump(save_data, open(self.config_path, "w"), indent=4)
 
     def add_acc(self, acc_name):
         creds = auth(self.accs.get(acc_name, {}).get("creds"))
 
         if creds:
-            self.accs[acc_name] = {"creds": json.loads(creds.to_json())}
+            self.accs[acc_name] = {"creds": creds}
             self._save_config()
             return True
         return False
