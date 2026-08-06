@@ -19,7 +19,7 @@ class StorageManager:
     def __init__(self, accs, fs_path="fs.json"):
         self.cipher = self._get_cipher()
         self.fs_path = fs_path
-        self.fs = self._load_json(fs_path)
+        self.fs = self._load_json(self.fs_path)
         self.cached_workers = {}
         self.accs = accs
 
@@ -51,15 +51,7 @@ class StorageManager:
             self.cached_workers[acc_name] = build("drive", "v3", credentials=creds)
         return self.cached_workers[acc_name]
 
-    def _upload_chunk_task(
-        self,
-        creds,
-        local_path,
-        byte_offset,
-        remote_name,
-        chunk_idx,
-        acc_name,
-    ):
+    def _upload_chunk_task(self, creds, local_path, byte_offset, remote_name, chunk_idx, acc_name):
         try:
             with open(local_path, "rb") as f:
                 f.seek(byte_offset)
@@ -124,17 +116,7 @@ class StorageManager:
 
                 byte_offset = chunk_idx * BLOCK_SIZE
 
-                upload_tasks.append(
-                    executor.submit(
-                        self._upload_chunk_task,
-                        creds,
-                        local_path,
-                        byte_offset,
-                        remote_name,
-                        chunk_idx,
-                        acc_name,
-                    )
-                )
+                upload_tasks.append(executor.submit(self._upload_chunk_task, creds, local_path, byte_offset, remote_name, chunk_idx, acc_name))
 
             for future in concurrent.futures.as_completed(upload_tasks):
                 res = future.result()

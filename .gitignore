@@ -1,6 +1,6 @@
 accounts_config.json
 credentials.json
-*.pycache*.
+__pycache__
 gdenv
 .vscode
 .env

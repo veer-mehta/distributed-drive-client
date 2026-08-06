@@ -23,9 +23,7 @@ def auth(creds):
         try:
             creds.refresh(Request())
         except Exception:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", [SCOPE]
-            )
+            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", [SCOPE])
             creds = flow.run_local_server(port=0)
 
     return creds

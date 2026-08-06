@@ -10,7 +10,6 @@ load_dotenv()
 
 def repl():
 
-    cur_dir = []
     run = True
     while run:
         match input(
